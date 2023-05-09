@@ -1,0 +1,62 @@
+1) Import the required packages
+
+################################################################################################################################
+#!pip install simpy
+import simpy
+import random
+import numpy as np
+import math
+################################################################################################################################
+
+
+2) Set input variables
+################################################################################################################################
+global N, nr_servers
+N= 1000 #Number of scans (Stop criterion)
+
+nr_servers={} #Input number of servers per workstation
+nr_servers[0]= 3
+nr_servers[1]= 2
+nr_servers[2]= 4
+nr_servers[3]= 3
+nr_servers[4]= 1
+################################################################################################################################
+
+3) Create randomisation functions
+
+
+################################################################################################################################
+np.random.seed(2020) 
+
+global lamb
+lamb= {} #Arrival rate
+lamb[0] = 1/0.25 #Input arrival rate = 1/mean interarrival time
+lamb[1] = 1/1 #Input arrival rate = 1/mean interarrival time
+
+#This function creates a random value following an exponential distribution
+def Exponential_distribution(lambdaValue):
+    j1 = np.random.uniform(0, 1)
+    if (j1 == 0): j1 += 0.0001
+    j2 = -math.log(j1)/lambdaValue
+    return j2
+
+#This function generates the interarrival time for scan coming from the radiology department
+def InterArrival_R():
+    interarrival_R = Exponential_distribution(lamb[0])
+    return interarrival_R
+
+#This function generates the interarrival time for scan coming from the other diagnostics departments
+def InterArrival_D():
+    interarrival_D = Exponential_distribution(lamb[1])
+    return interarrival_D
+
+#This function creates a random value determing the job type (source: Radiology)
+def JobType_R():
+    jobtype_R = np.random.choice(np.arange(1, 5), p=[0.2, 0.2, 0.1, 0.5])
+    return jobtype_R
+
+#This function creates a random value determing the job type (source: Other Diagnostics Dep)
+def JobType_D():
+    jobtype_d = np.random.choice(np.arange(1, 5), p=[0, 0.4, 0, 0.6])
+    return jobtype_d
+################################################################################################################################

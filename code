@@ -359,3 +359,84 @@ def wsArrival_wsDeparture_systemDeparture(env, s, self):
             ws5.ut_t.append(env.now - ws5.start)
 
 
+class Queueing(object):
+    def __init__(self, env):
+        self.store = simpy.Store(env)
+        self.env = env
+        self.waits = []
+        self.scan_arrived = 0
+
+    def queue(self, scan):
+        now = self.env.now
+        self.waits.append(now - scan.time) #Store waiting time
+        self.scan_arrived += 1
+        
+        
+        
+%%time
+################################################################################################################################
+data1 = open("RUN1.txt","w")
+summary1 = open("STATS1.txt","w")
+#data2 = open("RUN2.txt","w")
+#summary2 = open("STATS2.txt","w")
+#data3 = open("RUN3.txt","w")
+#summary3 = open("STATS3.txt","w")
+#data4 = open("RUN4.txt","w")
+#summary4 = open("STATS4.txt","w")
+#data5 = open("RUN5.txt","w")
+#summary5 = open("STATS5.txt","w")
+# Create the packet generators and sink
+
+system = Queueing(env)
+rscans = System(env, "RAD", InterArrival_R,  JobType_R, data1) 
+dscans = System(env, "DD", InterArrival_D,  JobType_D, data1)
+#rscans = System(env, "RAD", InterArrival_R,  JobType_R, data2) 
+#dscans = System(env, "DD", InterArrival_D,  JobType_D, data2)
+#rscans = System(env, "RAD", InterArrival_R,  JobType_R, data2) 
+#dscans = System(env, "DD", InterArrival_D,  JobType_D, data3)
+#rscans = System(env, "RAD", InterArrival_R,  JobType_R, data4)
+#dscans = System(env, "DD", InterArrival_D,  JobType_D, data4)
+#rscans = System(env, "RAD", InterArrival_R,  JobType_R, data5) 
+#dscans = System(env, "DD", InterArrival_D,  JobType_D, data5)
+
+rscans.out = system
+dscans.out = system
+
+env.run()
+
+ct_r = sum(system.waits)/len(system.waits)
+ut_r = sum(ws1.ut_t + ws2.ut_t + ws3.ut_t + ws4.ut_t + ws5.ut_t)/5/env.now
+#system.waits
+def create(summary):
+    summary.write('Avg utilisation Station WS1: ')
+    summary.write(str(round(((sum(ws1.ut_t)/env.now)*100),2)) + '%')
+    summary.write('\n')
+    summary.write('Avg utilisation Station WS2: ')
+    summary.write(str(round(((sum(ws2.ut_t)/env.now)*100),2)) + '%')
+    summary.write('\n')
+    summary.write('Avg utilisation Station WS3: ')
+    summary.write(str(round(((sum(ws3.ut_t)/env.now)*100),2)) + '%')
+    summary.write('\n')
+    summary.write('Avg utilisation Station WS4: ')
+    summary.write(str(round(((sum(ws4.ut_t)/env.now)*100),2)) + '%')
+    summary.write('\n')
+    summary.write('Avg utilisation Station WS5: ')
+    summary.write(str(round(((sum(ws5.ut_t)/env.now)*100),2)) + '%')
+    summary.write('\n')
+    summary.write('\n')
+    summary.write('Overall avg utilisation: ' + str(round(ut_r*100,2)) + '%')
+    summary.write('\n')
+    summary.write('\n')
+    summary.write('Average cycle time: ' + str(sum(system.waits)/len(system.waits)) + '\n')
+    summary.write('Processing time: ' + str(env.now) +'\n') # Is around 300, but running mulitple times keeps summing up
+    summary.write('\n')
+    summary.write('Objective function: ct - 10p = ' + str(ct_r - 10*ut_r))
+    
+create(summary1)
+#create(summary2)
+#create(summary3)
+#create(summary4)
+#create(summary5)
+
+## !!!! For some reason, the block needs to be run twice for the output to appear in the summary txt
+################################################################################################################################

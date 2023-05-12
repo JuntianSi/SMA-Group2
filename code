@@ -1,13 +1,11 @@
-#Import the required packages
+# Import the required packages
 
 import simpy
-import random
 import numpy as np
 import math
 
-
-global N, nr_servers, env
-
+global N, nr_servers
+global env
 env = simpy.Environment()
 # Define the number of scans to process
 N = 1000
@@ -18,82 +16,106 @@ nr_servers = {
     1: 2,  # Number of servers for workstation 1
     2: 4,  # Number of servers for workstation 2
     3: 3,  # Number of servers for workstation 3
-    4: 1   # Number of servers for workstation 4
+    4: 1  # Number of servers for workstation 4
 }
 
 np.random.seed(1234)
 
-lamb = [1/0.25, 1/1] #Arrival rates
 
-def Exponential_distribution(lambdaValue):
-    return np.random.exponential(scale=1/lambdaValue)
+# Arrival rates for various workstations
+lamb = {0: 1/0.25, 1: 1/1}
 
-def InterArrival_R():
-    return Exponential_distribution(lamb[0])
+def exponential_distribution(lambda_value):
+    """Creates a random value following an exponential distribution."""
+    j1 = np.random.uniform(0, 1)
+    j1 = max(j1, 0.0001)  # Ensure j1 is not zero
+    j2 = -math.log(j1) / lambda_value
+    return j2
 
-def InterArrival_D():
-    return Exponential_distribution(lamb[1])
+def interarrival_R():
+    """Generates the interarrival time for scan coming from the radiology department."""
+    return exponential_distribution(lamb[0])
 
-def JobType(probabilities):
-    return np.random.choice(np.arange(1, 5), p=probabilities)
+def interarrival_D():
+    """Generates the interarrival time for scan coming from the other diagnostics departments."""
+    return exponential_distribution(lamb[1])
 
-jobtype_R_probabilities = [0.2, 0.2, 0.1, 0.5]
-jobtype_D_probabilities = [0, 0.4, 0, 0.6]
+def job_type_R():
+    """Creates a random value determining the job type (source: Radiology)."""
+    return np.random.choice(np.arange(1, 5), p=[0.2, 0.2, 0.1, 0.5])
 
-jobtype_R = JobType(jobtype_R_probabilities)
-jobtype_D = JobType(jobtype_D_probabilities)
+def job_type_D():
+    """Creates a random value determining the job type (source: Other Diagnostics Dep)."""
+    return np.random.choice(np.arange(1, 5), p=[0, 0.4, 0, 0.6])
 
 
 class Scan:
-    def __init__(self, arrival_time: float, scan_type: int, scan_id: int) -> None:
-        if arrival_time < 0:
-            raise ValueError("arrival_time cannot be negative")
-        self.arrival_time = arrival_time
-        self.scan_type = scan_type
-        self.scan_id = scan_id
+    """
+    Class representing a scan with associated time, job type, and id.
+    """
 
-class Workstation(object):
+    def __init__(self, time, jobtype, id):
+        """
+        Initialize Scan instance.
 
-    def __init__(self, env, total_servers, job_durations):
+        Parameters:
+        time : float
+            Time at which the scan arrives at the output.
+        jobtype : int
+            Id of the job (1 through 4).
+        id : int
+            Id of the scan.
+        """
+        self.time = time
+        self.jobtype = jobtype
+        self.id = id
+
+
+def random_normal_time(mean, std):
+    return np.random.normal(mean, std) / 60
+
+
+class Workstation:
+    """
+    Class representing a workstation with associated servers, scans, and utility time.
+    """
+
+    def __init__(self, env, total_servers, id):
         self.store = simpy.Store(env)
         self.env = env
         self.out = None
-        self.scan_arrived = 0
-        self.server = simpy.Resource(env, total_servers)
-        self.job_durations = job_durations
+        self.scan_arrived = 0  # Keeps track of scans arriving
+        self.server = simpy.Resource(env, total_servers)  # servers are Resources in our system
+        self.ut_t = []
+        self.id = id
+        self.job_times = {
+            1: {1: (12, 2), 2: (15, 2), 3: (15, 3)},
+            2: {1: (20, 4), 3: (21, 3), 4: (18, 3)},
+            3: {1: (16, 4), 2: (14, 2), 3: (10, 1)},
+            4: {2: (20, 3), 3: (24, 4), 4: (13, 2)},
+            5: {1: (25, 5), 3: (20, 3), 4: (25, 5)},
+        }
 
     def process(self, x):
+        """
+        Process a job.
+
+        Parameters:
+        x : object
+            Scan object representing the job to be processed.
+        """
         self.scan_arrived += 1
         job = x.jobtype
-        pt = self.job_durations[job-1]()  # Call the job duration function for the specified job
+        mean, std = self.job_times[self.id].get(job, (0, 0))
+        pt = random_normal_time(mean, std)
         yield env.timeout(pt)
 
-# Define the job duration functions outside of the Workstation class
-def pt1():
-    return np.random.normal(12, 2)/60
 
-def pt2():
-    return np.random.normal(15, 2)/60
-
-def pt3():
-    return np.random.normal(15, 3)/60
-
-def pt4():
-    return np.random.normal(18, 3)/60
-
-# Define the job duration functions for each workstation
-ws1_job_durations = [pt1, pt2, pt3]
-ws2_job_durations = [pt1, None, pt3, pt4]
-ws3_job_durations = [pt1, pt2, pt3]
-ws4_job_durations = [None, pt2, pt3, pt4]
-ws5_job_durations = [pt1, None, pt3, pt4]
-
-# Create instances of the Workstation class with a loop
-workstations = []
-for i, job_durations, nr_servers in zip(range(1, 6), [ws1_job_durations, ws2_job_durations, ws3_job_durations, ws4_job_durations, ws5_job_durations], nr_servers_list):
-    workstation = Workstation(env, nr_servers, job_durations)
-    workstation.name = f"WS{i}"
-    workstations.append(workstation)
+ws1 = Workstation(env, nr_servers[0], id=1)
+ws2 = Workstation(env, nr_servers[1], id=2)
+ws3 = Workstation(env, nr_servers[2], id=3)
+ws4 = Workstation(env, nr_servers[3], id=4)
+ws5 = Workstation(env, nr_servers[4], id=5)
 
 
 class System(object):
@@ -105,258 +127,62 @@ class System(object):
         self.jobtype = jobtype
         self.file = file
         self.delay = delay
-        self.out = None
         self.total_scans = 0
         self.action = env.process(self.scan_arrivals_departures())
 
     def scan_arrivals_departures(self):
         yield self.env.timeout(self.delay)
-        while rscans.total_scans + dscans.total_scans + 1 < N:  # STOP CRITERION at 1000 scans
+        while self.is_scan_limit_not_reached():
             yield self.env.timeout(self.interarrival())  # Note point in time at which the scan arrives
             self.total_scans += 1  # Increment total scans by 1
             s = Scan(self.env.now, self.jobtype(), self.total_scans)  # Assign the scan its identity using Scan class
-
-            self.file.write(
-                'NEW SCAN (' + str(s.id) + '); SOURCE (' + str(self.source) + '); TIME (' + str(self.env.now) + ')')
-            self.file.write('\n')
-
+            self.write_to_file(s.id, self.source, self.env.now)
             env.process(wsArrival_wsDeparture_systemDeparture(env, s,
                                                               self))  # Let the scan run through the required ws and leave
 
+    def is_scan_limit_not_reached(self):
+        return rscans.total_scans + dscans.total_scans + 1 < N
+
+    def write_to_file(self, scan_id, source, now):
+        self.file.write(f'NEW SCAN ({scan_id}); SOURCE ({source}); TIME ({now})\n')
+
+
+def process_in_ws(env, ws, s, self):
+    with ws.server.request() as request:
+        yield request
+        if ws.server.count < 2:
+            ws.start = env.now
+        self.file.write(f'ARRIVE WS ({ws.id}); TIME ({self.env.now}); SCAN ({s.id}); TYPE ({self.source})\n')
+        yield env.process(ws.process(s))
+        self.file.write(f'DEPARTURE WS ({ws.id}); TIME ({self.env.now}); SCAN ({s.id}); TYPE ({self.source})\n')
+    if ws.server.count < 1:
+        ws.ut_t.append(env.now - ws.start)
 
 def wsArrival_wsDeparture_systemDeparture(env, s, self):
     if s.jobtype == 1:
-        with ws3.server.request() as request:  # Request a free server
-            yield request  # If they one is available, the scan is assigned
-            if ws3.server.count < 2:
-                ws3.start = env.now
-            self.file.write('ARRIVE WS (3); TIME (' + str(self.env.now) + '); SCAN (' + str(s.id) + '); TYPE (' + str(
-                self.source) + ')')
-            self.file.write('\n')
-            yield env.process(ws3.process(s))  # The scan is examined
-            self.file.write(
-                'DEPARTURE WS (3); TIME (' + str(self.env.now) + '); SCAN (' + str(s.id) + '); TYPE (' + str(
-                    self.source) + ')')
-            self.file.write('\n')
-        if ws3.server.count < 1:
-            ws3.ut_t.append(env.now - ws3.start)  # If none are available, the waiting time is recorded
+        yield from process_in_ws(env, ws3, s, self)
+        yield from process_in_ws(env, ws1, s, self)
+        yield from process_in_ws(env, ws2, s, self)
+        yield from process_in_ws(env, ws5, s, self)
+        self.out.queue(s)
+    elif s.jobtype == 2:
+        yield from process_in_ws(env, ws4, s, self)
+        yield from process_in_ws(env, ws1, s, self)
+        yield from process_in_ws(env, ws3, s, self)
+        self.out.queue(s)
+    elif s.jobtype == 3:
+        yield from process_in_ws(env, ws2, s, self)
+        yield from process_in_ws(env, ws5, s, self)
+        yield from process_in_ws(env, ws1, s, self)
+        yield from process_in_ws(env, ws4, s, self)
+        yield from process_in_ws(env, ws3, s, self)
+        self.out.queue(s)
+    elif s.jobtype == 4:
+        yield from process_in_ws(env, ws2, s, self)
+        yield from process_in_ws(env, ws4, s, self)
+        yield from process_in_ws(env, ws5, s, self)
+        self.out.queue(s)
 
-        with ws1.server.request() as request:  # It moves on to the next ws in line
-            yield request
-            if ws1.server.count < 2:
-                ws1.start = env.now
-            self.file.write('ARRIVE WS (1); TIME (' + str(self.env.now) + '); SCAN (' + str(s.id) + '); TYPE (' + str(
-                self.source) + ')')
-            self.file.write('\n')
-            yield env.process(ws1.process(s))
-            self.file.write(
-                'DEPARTURE WS (1); TIME (' + str(self.env.now) + '); SCAN (' + str(s.id) + '); TYPE (' + str(
-                    self.source) + ')')
-            self.file.write('\n')
-        if ws1.server.count < 1:
-            ws1.ut_t.append(env.now - ws1.start)
-
-        with ws2.server.request() as request:
-            yield request
-            if ws2.server.count < 2:
-                ws2.start = env.now
-            self.file.write('ARRIVE WS (2); TIME (' + str(self.env.now) + '); SCAN (' + str(s.id) + '); TYPE (' + str(
-                self.source) + ')')
-            self.file.write('\n')
-            yield env.process(ws2.process(s))
-            self.file.write(
-                'DEPARTURE WS (2); TIME (' + str(self.env.now) + '); SCAN (' + str(s.id) + '); TYPE (' + str(
-                    self.source) + ')')
-            self.file.write('\n')
-        if ws2.server.count < 1:
-            ws2.ut_t.append(env.now - ws2.start)
-
-        with ws5.server.request() as request:
-            yield request
-            if ws5.server.count < 2:
-                ws5.start = env.now
-            self.file.write('ARRIVE WS (5); TIME (' + str(self.env.now) + '); SCAN (' + str(s.id) + '); TYPE (' + str(
-                self.source) + ')')
-            self.file.write('\n')
-            yield env.process(ws5.process(s))
-            self.out.queue(s)  # All the waiting line information from that particular scan gets stored
-            self.file.write(
-                'DEPARTURE WS (5); TIME (' + str(self.env.now) + '); SCAN (' + str(s.id) + '); TYPE (' + str(
-                    self.source) + ')')
-            self.file.write('\n')
-        if ws5.server.count < 1:
-            ws5.ut_t.append(env.now - ws5.start)
-
-    if s.jobtype == 2:
-        with ws4.server.request() as request:
-            yield request
-            if ws4.server.count < 2:
-                ws4.start = env.now
-            self.file.write('ARRIVE WS (4); TIME (' + str(self.env.now) + '); SCAN (' + str(s.id) + '); TYPE (' + str(
-                self.source) + ')')
-            self.file.write('\n')
-            yield env.process(ws4.process(s))
-            self.file.write(
-                'DEPARTURE WS (4); TIME (' + str(self.env.now) + '); SCAN (' + str(s.id) + '); TYPE (' + str(
-                    self.source) + ')')
-            self.file.write('\n')
-        if ws4.server.count < 1:
-            ws4.ut_t.append(env.now - ws4.start)
-
-        with ws1.server.request() as request:
-            yield request
-            if ws1.server.count < 2:
-                ws1.start = env.now
-            self.file.write('ARRIVE WS (1); TIME (' + str(self.env.now) + '); SCAN (' + str(s.id) + '); TYPE (' + str(
-                self.source) + ')')
-            self.file.write('\n')
-            yield env.process(ws1.process(s))
-            self.file.write(
-                'DEPARTURE WS (1); TIME (' + str(self.env.now) + '); SCAN (' + str(s.id) + '); TYPE (' + str(
-                    self.source) + ')')
-            self.file.write('\n')
-        if ws1.server.count < 1:
-            ws1.ut_t.append(env.now - ws1.start)
-
-        with ws3.server.request() as request:
-            yield request
-            if ws3.server.count < 2:
-                ws3.start = env.now
-            self.file.write('ARRIVE WS (3); TIME (' + str(self.env.now) + '); SCAN (' + str(s.id) + '); TYPE (' + str(
-                self.source) + ')')
-            self.file.write('\n')
-            yield env.process(ws3.process(s))
-            self.out.queue(s)
-            self.file.write(
-                'DEPARTURE WS (3); TIME (' + str(self.env.now) + '); SCAN (' + str(s.id) + '); TYPE (' + str(
-                    self.source) + ')')
-            self.file.write('\n')
-        if ws3.server.count < 1:
-            ws3.ut_t.append(env.now - ws3.start)
-
-    if s.jobtype == 3:
-        with ws2.server.request() as request:
-            yield request
-            if ws2.server.count < 2:
-                ws2.start = env.now
-            self.file.write('ARRIVE WS (2); TIME (' + str(self.env.now) + '); SCAN (' + str(s.id) + '); TYPE (' + str(
-                self.source) + ')')
-            self.file.write('\n')
-            yield env.process(ws2.process(s))
-            self.file.write(
-                'DEPARTURE WS (2); TIME (' + str(self.env.now) + '); SCAN (' + str(s.id) + '); TYPE (' + str(
-                    self.source) + ')')
-            self.file.write('\n')
-        if ws2.server.count < 1:
-            ws2.ut_t.append(env.now - ws2.start)
-
-        with ws5.server.request() as request:
-            yield request
-            if ws5.server.count < 2:
-                ws5.start = env.now
-            self.file.write('ARRIVE WS (5); TIME (' + str(self.env.now) + '); SCAN (' + str(s.id) + '); TYPE (' + str(
-                self.source) + ')')
-            self.file.write('\n')
-            yield env.process(ws5.process(s))
-            self.file.write(
-                'DEPARTURE WS (5); TIME (' + str(self.env.now) + '); SCAN (' + str(s.id) + '); TYPE (' + str(
-                    self.source) + ')')
-            self.file.write('\n')
-        if ws5.server.count < 1:
-            ws5.ut_t.append(env.now - ws5.start)
-
-        with ws1.server.request() as request:
-            yield request
-            if ws1.server.count < 2:
-                ws1.start = env.now
-            self.file.write('ARRIVE WS (1); TIME (' + str(self.env.now) + '); SCAN (' + str(s.id) + '); TYPE (' + str(
-                self.source) + ')')
-            self.file.write('\n')
-            yield env.process(ws1.process(s))
-            self.file.write(
-                'DEPARTURE WS (1); TIME (' + str(self.env.now) + '); SCAN (' + str(s.id) + '); TYPE (' + str(
-                    self.source) + ')')
-            self.file.write('\n')
-        if ws1.server.count < 1:
-            ws1.ut_t.append(env.now - ws1.start)
-
-        with ws4.server.request() as request:
-            yield request
-            if ws4.server.count < 2:
-                ws4.start = env.now
-            self.file.write('ARRIVE WS (4); TIME (' + str(self.env.now) + '); SCAN (' + str(s.id) + '); TYPE (' + str(
-                self.source) + ')')
-            self.file.write('\n')
-            yield env.process(ws4.process(s))
-            self.file.write(
-                'DEPARTURE WS (4); TIME (' + str(self.env.now) + '); SCAN (' + str(s.id) + '); TYPE (' + str(
-                    self.source) + ')')
-            self.file.write('\n')
-        if ws4.server.count < 1:
-            ws4.ut_t.append(env.now - ws4.start)
-
-        with ws3.server.request() as request:
-            yield request
-            if ws3.server.count < 2:
-                ws3.start = env.now
-            self.file.write('ARRIVE WS (3); TIME (' + str(self.env.now) + '); SCAN (' + str(s.id) + '); TYPE (' + str(
-                self.source) + ')')
-            self.file.write('\n')
-            yield env.process(ws3.process(s))
-            self.out.queue(s)
-            self.file.write(
-                'DEPARTURE WS (3); TIME (' + str(self.env.now) + '); SCAN (' + str(s.id) + '); TYPE (' + str(
-                    self.source) + ')')
-            self.file.write('\n')
-        if ws3.server.count < 1:
-            ws3.ut_t.append(env.now - ws3.start)
-
-    if s.jobtype == 4:
-        with ws2.server.request() as request:
-            yield request
-            if ws2.server.count < 2:
-                ws2.start = env.now
-            self.file.write('ARRIVE WS (2); TIME (' + str(self.env.now) + '); SCAN (' + str(s.id) + '); TYPE (' + str(
-                self.source) + ')')
-            self.file.write('\n')
-            yield env.process(ws2.process(s))
-            self.file.write(
-                'DEPARTURE WS (2); TIME (' + str(self.env.now) + '); SCAN (' + str(s.id) + '); TYPE (' + str(
-                    self.source) + ')')
-            self.file.write('\n')
-        if ws2.server.count < 1:
-            ws2.ut_t.append(env.now - ws2.start)
-
-        with ws4.server.request() as request:
-            yield request
-            if ws4.server.count < 2:
-                ws4.start = env.now
-            self.file.write('ARRIVE WS (4); TIME (' + str(self.env.now) + '); SCAN (' + str(s.id) + '); TYPE (' + str(
-                self.source) + ')')
-            self.file.write('\n')
-            yield env.process(ws4.process(s))
-            self.file.write(
-                'DEPARTURE WS (4); TIME (' + str(self.env.now) + '); SCAN (' + str(s.id) + '); TYPE (' + str(
-                    self.source) + ')')
-            self.file.write('\n')
-        if ws4.server.count < 1:
-            ws4.ut_t.append(env.now - ws4.start)
-
-        with ws5.server.request() as request:
-            yield request
-            if ws5.server.count < 2:
-                ws5.start = env.now
-            self.file.write('ARRIVE WS (5); TIME (' + str(self.env.now) + '); SCAN (' + str(s.id) + '); TYPE (' + str(
-                self.source) + ')')
-            self.file.write('\n')
-            yield env.process(ws5.process(s))
-            self.out.queue(s)
-            self.file.write(
-                'DEPARTURE WS (5); TIME (' + str(self.env.now) + '); SCAN (' + str(s.id) + '); TYPE (' + str(
-                    self.source) + ')')
-            self.file.write('\n')
-        if ws5.server.count < 1:
-            ws5.ut_t.append(env.now - ws5.start)
 
 
 class Queueing(object):
@@ -368,75 +194,36 @@ class Queueing(object):
 
     def queue(self, scan):
         now = self.env.now
-        self.waits.append(now - scan.time) #Store waiting time
+        self.waits.append(now - scan.time)  # Store waiting time
         self.scan_arrived += 1
-        
-        
-        
-%%time
-################################################################################################################################
-data1 = open("RUN1.txt","w")
-summary1 = open("STATS1.txt","w")
-#data2 = open("RUN2.txt","w")
-#summary2 = open("STATS2.txt","w")
-#data3 = open("RUN3.txt","w")
-#summary3 = open("STATS3.txt","w")
-#data4 = open("RUN4.txt","w")
-#summary4 = open("STATS4.txt","w")
-#data5 = open("RUN5.txt","w")
-#summary5 = open("STATS5.txt","w")
+
+
+def create(summary, ws_list, system, env):
+    for i, ws in enumerate(ws_list, start=1):
+        summary.write(f'Avg utilisation Station WS{i}: {round((sum(ws.ut_t)/env.now)*100, 2)}%\n')
+
+    ut_r = sum(sum(ws.ut_t) for ws in ws_list)/len(ws_list)/env.now
+    summary.write(f'Overall avg utilisation: {round(ut_r*100, 2)}%\n\n')
+    ct_r = sum(system.waits)/len(system.waits)
+    summary.write(f'Average cycle time: {ct_r}\n')
+    summary.write(f'Processing time: {env.now}\n\n') # Is around 300, but running multiple times keeps summing up
+    summary.write(f'Objective function: ct - 10p = {ct_r - 10*ut_r}\n')
+
 # Create the packet generators and sink
+data_files = ["RUN1.txt", "RUN2.txt", "RUN3.txt", "RUN4.txt", "RUN5.txt"]
+summary_files = ["STATS1.txt", "STATS2.txt", "STATS3.txt", "STATS4.txt", "STATS5.txt"]
 
-system = Queueing(env)
-rscans = System(env, "RAD", InterArrival_R,  JobType_R, data1) 
-dscans = System(env, "DD", InterArrival_D,  JobType_D, data1)
-#rscans = System(env, "RAD", InterArrival_R,  JobType_R, data2) 
-#dscans = System(env, "DD", InterArrival_D,  JobType_D, data2)
-#rscans = System(env, "RAD", InterArrival_R,  JobType_R, data2) 
-#dscans = System(env, "DD", InterArrival_D,  JobType_D, data3)
-#rscans = System(env, "RAD", InterArrival_R,  JobType_R, data4)
-#dscans = System(env, "DD", InterArrival_D,  JobType_D, data4)
-#rscans = System(env, "RAD", InterArrival_R,  JobType_R, data5) 
-#dscans = System(env, "DD", InterArrival_D,  JobType_D, data5)
+ws_list = [ws1, ws2, ws3, ws4, ws5]
 
-rscans.out = system
-dscans.out = system
+for data_file, summary_file in zip(data_files, summary_files):
+    with open(data_file, "w") as data, open(summary_file, "w") as summary:
+        system = Queueing(env)
+        rscans = System(env, "RAD", interarrival_R,  job_type_R, data)
+        dscans = System(env, "DD", interarrival_D,  job_type_D, data)
 
-env.run()
+        rscans.out = system
+        dscans.out = system
 
-ct_r = sum(system.waits)/len(system.waits)
-ut_r = sum(ws1.ut_t + ws2.ut_t + ws3.ut_t + ws4.ut_t + ws5.ut_t)/5/env.now
-#system.waits
-def create(summary):
-    summary.write('Avg utilisation Station WS1: ')
-    summary.write(str(round(((sum(ws1.ut_t)/env.now)*100),2)) + '%')
-    summary.write('\n')
-    summary.write('Avg utilisation Station WS2: ')
-    summary.write(str(round(((sum(ws2.ut_t)/env.now)*100),2)) + '%')
-    summary.write('\n')
-    summary.write('Avg utilisation Station WS3: ')
-    summary.write(str(round(((sum(ws3.ut_t)/env.now)*100),2)) + '%')
-    summary.write('\n')
-    summary.write('Avg utilisation Station WS4: ')
-    summary.write(str(round(((sum(ws4.ut_t)/env.now)*100),2)) + '%')
-    summary.write('\n')
-    summary.write('Avg utilisation Station WS5: ')
-    summary.write(str(round(((sum(ws5.ut_t)/env.now)*100),2)) + '%')
-    summary.write('\n')
-    summary.write('\n')
-    summary.write('Overall avg utilisation: ' + str(round(ut_r*100,2)) + '%')
-    summary.write('\n')
-    summary.write('\n')
-    summary.write('Average cycle time: ' + str(sum(system.waits)/len(system.waits)) + '\n')
-    summary.write('Processing time: ' + str(env.now) +'\n') # Is around 300, but running mulitple times keeps summing up
-    summary.write('\n')
-    summary.write('Objective function: ct - 10p = ' + str(ct_r - 10*ut_r))
-    
-create(summary1)
-#create(summary2)
-#create(summary3)
-#create(summary4)
-#create(summary5)
+        env.run()
 
-## !!!! For some reason, the block needs to be run twice for the output to appear in the summary txt
-################################################################################################################################
+        create(summary, ws_list, system, env)
